@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# script to create date-named btrfs snapshots
+# intended to be run as cronjob
+
+/usr/bin/logger "starting snapshotter job"
+
+# this script currently assumes you have a /etc/fstab-post for the root of your btrfs filesystem
+# this variable wants that mount point:
+MOUNT_POINT_PATH="/media/btrfs"
+# relative to that, specify what subvolume should be snapshotted
+SUBVOLUME_PATH="/snapshot"
+
+# specify the format of the subvolume naming.
+# I've used '.' as delimeters, and use the date command to get a unique filename
+# change if you want.
+# get today's date for filename
+SS_DELIM="."
+SNAPSHOT_NAME="${SS_DELIM}$(/bin/date +%Y${SS_DELIM}%m${SS_DELIM}%d)"
+
+# mount the volume, if not mounted. 
+if [ "$(/bin/mount -l | /bin/grep "${MOUNT_POINT_PATH}")" == "" ] ; then 
+  /bin/mount ${MOUNT_POINT_PATH}
+
+  # log & exit if any error
+  ERR_CODE=$?
+  if [ "${ERR_CODE}" -ne 0 ] ; then /usr/bin/logger "snapshotter error: ${ERR_CODE} from mount"; exit 1; fi
+
+  WE_MOUNTED=1
+else
+  WE_MOUNTED=0
+fi
+
+# check if the name we want to use is allready taken
+# if it is, at an enumerator
+# if the enumerator is taken, increase it until we hit a free one
+I=0
+PATH_INCREMENTED=0
+while [ -e "${MOUNT_POINT_PATH}${SUBVOLUME_PATH}${SNAPSHOT_NAME}" ] ; do
+  if [ ${PATH_INCREMENTED} -eq 1 ] ; then
+    SNAPSHOT_NAME=${SNAPSHOT_NAME%${SS_DELIM}${I}}
+  fi
+  ((I++))
+  SNAPSHOT_NAME="${SNAPSHOT_NAME}${SS_DELIM}${I}"
+  PATH_INCREMENTED=1
+done
+
+# make a snapshot
+/bin/btrfs subvolume snapshot "${MOUNT_POINT_PATH}${SUBVOLUME_PATH}" "${MOUNT_POINT_PATH}${SUBVOLUME_PATH}${SNAPSHOT_NAME}" | /usr/bin/logger
+
+# log & exit if any error
+ERR_CODE=$?
+if [ "${ERR_CODE}" -ne 0 ] ; then /usr/bin/logger "snapshotter error: ${ERR_CODE} from btrfs"; exit 1; fi
+
+
+
+# if this script mounted the volume, then unmount it afterwards
+if [ ${WE_MOUNTED} -eq 1 ] ; then
+  /bin/umount ${MOUNT_POINT_PATH}
+
+  # log & exit if any error
+  ERR_CODE=$?
+  if [ "${ERR_CODE}" -ne 0 ] ; then /usr/bin/logger "snapshotter error: ${ERR_CODE} from umount"; exit 1; fi
+
+fi
+
+exit 0
